@@ -15,6 +15,10 @@ var can_possess := false
 var _fingers := {}
 var _joy_origin := Vector2.ZERO
 var _pulse := 0.0
+var _l := 0.0
+var _t := 0.0
+var _r := 0.0
+var _b := 0.0
 var _panel := StyleBoxFlat.new()
 var _track := StyleBoxFlat.new()
 var _fill := StyleBoxFlat.new()
@@ -24,7 +28,6 @@ var _font: Font
 const ACCENT := Color(0.3, 0.75, 1.0)
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_font = ThemeDB.fallback_font
 	_panel.bg_color = Color(0.03, 0.07, 0.13, 0.62)
@@ -36,16 +39,40 @@ func _ready() -> void:
 	_fill.set_corner_radius_all(11)
 	_pill.set_corner_radius_all(20)
 	_pill.set_border_width_all(2)
+	_layout()
+
+# Size the HUD to the visible screen by hand (anchors under a CanvasLayer were unreliable)
+# and read the phone's safe area (notch / rounded corners).
+func _layout() -> void:
+	var vs := get_viewport_rect().size
+	position = Vector2.ZERO
+	size = vs
+	_l = 0.0
+	_t = 0.0
+	_r = 0.0
+	_b = 0.0
+	if OS.has_feature("android") or OS.has_feature("ios"):
+		var win := Vector2(DisplayServer.window_get_size())
+		var sa := Rect2(DisplayServer.get_display_safe_area())
+		if win.x > 0.0 and sa.size.x > 0.0:
+			var k := vs / win
+			_l = clampf(sa.position.x * k.x, 0.0, 140.0)
+			_t = clampf(sa.position.y * k.y, 0.0, 140.0)
+			_r = clampf(vs.x - sa.end.x * k.x, 0.0, 140.0)
+			_b = clampf(vs.y - sa.end.y * k.y, 0.0, 140.0)
 
 func _process(delta: float) -> void:
 	_pulse += delta
+	_layout()
 	queue_redraw()
 
 func _btn_pos(id: String) -> Vector2:
+	var rx := size.x - _r
+	var by := size.y - _b
 	match id:
-		"jump": return Vector2(size.x - 150, size.y - 140)
-		"water": return Vector2(size.x - 320, size.y - 90)
-	return Vector2(size.x - 110, size.y - 300)
+		"jump": return Vector2(rx - 150, by - 140)
+		"water": return Vector2(rx - 320, by - 90)
+	return Vector2(rx - 110, by - 300)
 
 func _hit(p: Vector2) -> String:
 	if p.distance_to(_btn_pos("jump")) < 85.0: return "jump"
@@ -83,7 +110,8 @@ func _txt(pos: Vector2, s: String, size_px: int, col: Color, w := -1.0, al := HO
 func _draw() -> void:
 	var hp := clampf(health / 100.0, 0.0, 1.0)
 	var dim := Color(1, 1, 1, 0.7)
-	# Health
+	# Health (top-left)
+	draw_set_transform(Vector2(_l, _t))
 	draw_style_box(_panel, Rect2(24, 24, 360, 92))
 	_txt(Vector2(46, 56), "HEALTH", 18, dim)
 	_txt(Vector2(46, 56), str(int(health)), 22, Color.WHITE, 316.0, HORIZONTAL_ALIGNMENT_RIGHT)
@@ -91,18 +119,19 @@ func _draw() -> void:
 	_fill.bg_color = Color(0.95, 0.25, 0.25).lerp(Color(0.3, 0.9, 0.5), hp)
 	if hp > 0.03:
 		draw_style_box(_fill, Rect2(46, 70, 316.0 * hp, 22))
-	# Speed
-	var sx := size.x - 254.0
-	draw_style_box(_panel, Rect2(sx, 24, 230, 92))
-	_txt(Vector2(sx + 22, 54), "SPEED", 18, dim)
-	_txt(Vector2(sx + 22, 100), str(int(speed)), 44, Color.WHITE)
-	_txt(Vector2(sx + 88, 100), "km/h", 18, dim)
-	var gc := Vector2(sx + 185, 72)
+	# Speed (top-right)
+	draw_set_transform(Vector2(size.x - _r - 254.0, _t))
+	draw_style_box(_panel, Rect2(0, 24, 230, 92))
+	_txt(Vector2(22, 54), "SPEED", 18, dim)
+	_txt(Vector2(22, 100), str(int(speed)), 44, Color.WHITE)
+	_txt(Vector2(88, 100), "km/h", 18, dim)
+	var gc := Vector2(185, 72)
 	draw_arc(gc, 26, PI * 0.75, PI * 2.25, 32, Color(1, 1, 1, 0.15), 6.0, true)
 	var sr := clampf(speed / 36.0, 0.0, 1.0)
 	if sr > 0.02:
 		draw_arc(gc, 26, PI * 0.75, PI * 0.75 + PI * 1.5 * sr, 32, ACCENT, 6.0, true)
-	# Form pill
+	# Form pill (top-center)
+	draw_set_transform(Vector2(0, _t))
 	var pc := ACCENT if water_form else Color(1.0, 0.8, 0.4)
 	_pill.bg_color = Color(pc, 0.22)
 	_pill.border_color = Color(pc, 0.8)
@@ -111,12 +140,13 @@ func _draw() -> void:
 	if can_possess:
 		var a := 0.6 + 0.4 * sin(_pulse * 6.0)
 		_txt(Vector2(0, 104), "Tap POSSESS to enter the person", 20, Color(1, 1, 1, a), size.x, HORIZONTAL_ALIGNMENT_CENTER)
+	draw_set_transform(Vector2.ZERO)
 	# Joystick
 	var active := false
 	for v in _fingers.values():
 		if v == "joy":
 			active = true
-	var base := _joy_origin if active else Vector2(190, size.y - 160)
+	var base := _joy_origin if active else Vector2(_l + 190.0, size.y - _b - 160.0)
 	draw_circle(base, 90, Color(1, 1, 1, 0.08))
 	draw_arc(base, 90, 0, TAU, 48, Color(1, 1, 1, 0.3 if active else 0.15), 3.0, true)
 	draw_circle(base + move_vec * 70.0, 38, Color(1, 1, 1, 0.35 if active else 0.15))
