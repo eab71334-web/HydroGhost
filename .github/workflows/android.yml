@@ -1,1 +1,109 @@
+name: Android APK
 
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_MINOR: "4.7"
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} + export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools build-tools;35.0.1 build-tools;36.1.0 platforms;android-35 platforms;android-36"
+
+      - name: Write Android export preset
+        run: |
+          cat > export_presets.cfg <<'EOT'
+          [preset.0]
+
+          name="Android"
+          platform="Android"
+          runnable=true
+          advanced_options=false
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="build/android/HydroGhost.apk"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
+
+          [preset.0.options]
+
+          gradle_build/use_gradle_build=false
+          package/unique_name="com.hydroghost.game"
+          package/name="Hydro Ghost"
+          package/signed=true
+
+          version/code=1
+          version/name="1.0.0"
+
+          architectures/armeabi-v7a=false
+          architectures/arm64-v8a=true
+          architectures/x86=false
+          architectures/x86_64=false
+
+          screen/immersive_mode=true
+          EOT
+
+      - name: Debug keystore + Godot editor settings
+        run: |
+          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android \
+            -keystore "$RUNNER_TEMP/debug.keystore" -storepass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -validity 9999 -deststoretype pkcs12
+
+          mkdir -p ~/.config/godot
+
+          cat > ~/.config/godot/editor_settings-$GODOT_MINOR.tres <<EOT
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$RUNNER_TEMP/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOT
+
+      - name: Import project
+        run: godot --headless --import || true
+
+      - name: Export APK
+        run: |
+          mkdir -p build/android
+          godot --headless --verbose --export-debug "Android" build/android/HydroGhost.apk
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HydroGhost-v1.0.0.apk
+          path: build/android/HydroGhost.apk
+          archive: false

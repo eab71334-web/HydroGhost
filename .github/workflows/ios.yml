@@ -1,0 +1,93 @@
+name: iOS IPA (unsigned)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} + export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Write iOS export preset
+        run: |
+          cat > export_presets.cfg <<'EOT'
+          [preset.0]
+
+          name="iOS"
+          platform="iOS"
+          runnable=true
+          advanced_options=false
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="build/ios/HydroGhost.ipa"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
+
+          [preset.0.options]
+
+          architectures/arm64=true
+          application/app_store_team_id="0000000000"
+          application/bundle_identifier="com.hydroghost.game"
+          application/name="Hydro Ghost"
+          application/short_version="1.0.0"
+          application/version="1.0.0"
+          application/targeted_device_family=2
+          application/export_project_only=true
+          application/code_sign_identity_debug=""
+          application/code_sign_identity_release=""
+          application/provisioning_profile_uuid_debug=""
+          application/provisioning_profile_uuid_release=""
+          EOT
+
+      - name: Import project
+        run: godot --headless --import || true
+
+      - name: Export Xcode project
+        run: |
+          mkdir -p build/ios
+          godot --headless --verbose --export-release "iOS" build/ios/HydroGhost.ipa
+          find build/ios -maxdepth 2 | head -50
+
+      - name: Build unsigned app
+        run: |
+          PROJ=$(find build/ios -maxdepth 2 -name "*.xcodeproj" | head -1)
+          SCHEME=$(basename "$PROJ" .xcodeproj)
+          echo "Project: $PROJ  Scheme: $SCHEME"
+          xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration Release \
+            -sdk iphoneos -destination "generic/platform=iOS" \
+            -archivePath build/app.xcarchive archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/app.xcarchive/Products/Applications/*.app Payload/
+          zip -qr HydroGhost.ipa Payload
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HydroGhost-v1.0.0.ipa
+          path: HydroGhost.ipa
+          archive: false
