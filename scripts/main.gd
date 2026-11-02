@@ -71,7 +71,7 @@ func _slab(pos: Vector3, size: Vector3, c: Color, solid := true) -> void:
 		holder.add_child(cs)
 
 func _world() -> void:
-	var grass := Color(0.36, 0.62, 0.28)
+	var grass := Color(0.3, 0.58, 0.22)
 	var tile := Color(0.62, 0.78, 0.88)
 	_slab(Vector3(-103.5, -1, 0), Vector3(193, 2, 400), grass)
 	_slab(Vector3(103.5, -1, 0), Vector3(193, 2, 400), grass)
@@ -166,17 +166,16 @@ func _environment() -> void:
 	e.background_mode = Environment.BG_SKY
 	e.sky = s
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_energy = 0.9
-	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.ambient_light_energy = 0.5
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.74, 0.87, 1.0)
-	e.fog_density = 0.008
+	e.fog_density = 0.004
 	var we := WorldEnvironment.new()
 	we.environment = e
 	add_child(we)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-55, -35, 0)
-	sun.light_energy = 1.15
+	sun.light_energy = 0.9
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_max_distance = 45.0
