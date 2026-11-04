@@ -13,6 +13,7 @@ const GRAV := 24.0
 static var _meshes := {}
 static var _mats := {}
 static var _water: StandardMaterial3D
+static var _blob: ShaderMaterial
 
 var controlled := false
 var water_form := false
@@ -38,6 +39,8 @@ var col: CollisionShape3D
 var cap: CapsuleShape3D
 var drips: CPUParticles3D
 var splash: CPUParticles3D
+var trail: Array[MeshInstance3D] = []
+var puddle: MeshInstance3D
 var legs: Array[Node3D] = []
 var knees: Array[Node3D] = []
 var arms: Array[Node3D] = []
@@ -55,6 +58,12 @@ static func water_mat() -> StandardMaterial3D:
 		m.rim = 0.8
 		_water = m
 	return _water
+
+static func blob_mat() -> ShaderMaterial:
+	if _blob == null:
+		_blob = ShaderMaterial.new()
+		_blob.shader = load("res://shaders/water_blob.gdshader")
+	return _blob
 
 static func _mat(c: Color) -> StandardMaterial3D:
 	if not _mats.has(c):
@@ -150,26 +159,47 @@ func _build_blob() -> void:
 	var o := SphereMesh.new()
 	o.radius = 0.7
 	o.height = 1.4
-	o.radial_segments = 20
-	o.rings = 10
+	o.radial_segments = 32
+	o.rings = 16
 	var mo := MeshInstance3D.new()
 	mo.mesh = o
-	mo.material_override = water_mat()
+	mo.material_override = blob_mat()
 	mo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	blob.add_child(mo)
-	var i := SphereMesh.new()
-	i.radius = 0.42
-	i.height = 0.84
-	i.radial_segments = 12
-	i.rings = 6
-	var core := StandardMaterial3D.new()
-	core.albedo_color = Color(0.04, 0.3, 0.85, 0.85)
-	core.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	var mc := MeshInstance3D.new()
-	mc.mesh = i
-	mc.material_override = core
-	mc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	blob.add_child(mc)
+	# trailing droplets (liquid feel while moving)
+	for i in 5:
+		var sm := SphereMesh.new()
+		sm.radius = 0.5
+		sm.height = 1.0
+		sm.radial_segments = 14
+		sm.rings = 7
+		var m := MeshInstance3D.new()
+		m.mesh = sm
+		m.material_override = blob_mat()
+		m.top_level = true
+		m.visible = false
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(m)
+		trail.append(m)
+	# wet puddle under the water body
+	var pm := CylinderMesh.new()
+	pm.top_radius = 0.9
+	pm.bottom_radius = 0.9
+	pm.height = 0.02
+	pm.radial_segments = 28
+	pm.rings = 1
+	var pmat := StandardMaterial3D.new()
+	pmat.albedo_color = Color(0.04, 0.28, 0.6, 0.4)
+	pmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	pmat.roughness = 0.03
+	pmat.metallic_specular = 1.0
+	puddle = MeshInstance3D.new()
+	puddle.mesh = pm
+	puddle.material_override = pmat
+	puddle.position.y = 0.03
+	puddle.visible = false
+	puddle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(puddle)
 
 func _particles(n: int, life: float, burst: bool) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
@@ -305,20 +335,35 @@ func _process(delta: float) -> void:
 	var cam := get_viewport().get_camera_3d()
 	var d := 0.0 if cam == null else cam.global_position.distance_to(global_position)
 	var e := morph * morph * (3.0 - 2.0 * morph)
-	rig.visible = morph < 0.98
+	rig.visible = morph < 0.9
 	blob.visible = morph > 0.02
 	rig.rotation.y = lerp_angle(rig.rotation.y, yaw, 1.0 - exp(-12.0 * delta))
 	if rig.visible:
-		var hs := maxf(1.0 - e, 0.02)
-		rig.scale = Vector3(1.0 + squash * 0.1, 1.0 - squash * 0.16, 1.0 + squash * 0.1) * hs
+		var hy := maxf(1.0 - e * 1.25, 0.02)  # human melts: flatter and wider
+		var wx := 1.0 + e * 0.5
+		rig.scale = Vector3(wx * (1.0 + squash * 0.1), hy * (1.0 - squash * 0.16), wx * (1.0 + squash * 0.1))
 		if d < LOD_DIST:
 			_animate(delta, spd)
+	var st := clampf(spd / 10.0, 0.0, 0.45)
 	if blob.visible:
-		var w := sin(t * 5.0) * 0.07 + sin(t * 8.3) * 0.03
-		var st := clampf(spd / 10.0, 0.0, 0.4)
+		var w := sin(t * 5.0) * 0.05 + sin(t * 8.3) * 0.025
 		blob.rotation.y = rig.rotation.y
-		blob.scale = Vector3(1.0 + w - st * 0.3, 1.0 - w * 1.2 - st * 0.25 - squash * 0.25, 1.0 + st * 0.6 + w) * maxf(e, 0.02)
+		blob.scale = Vector3(1.12 - st * 0.35 + w * 0.5, 0.82 + st * 0.35 - w - squash * 0.25, 1.0 + st * 0.7 + w) * maxf(e, 0.02)
 		blob.position.y = 0.7 * blob.scale.y
+	puddle.visible = water_form and not in_water and is_on_floor() and morph > 0.05
+	if puddle.visible:
+		puddle.rotation.y = rig.rotation.y
+		puddle.scale = Vector3((1.25 + st * 0.5) * e, 1.0, (1.25 + st * 1.2) * e)
+	for i in trail.size():
+		var m := trail[i]
+		var show := blob.visible and spd > 0.8 and e > 0.5
+		var tgt := global_position + Vector3(0, 0.22 + 0.06 * i, 0) - Vector3(velocity.x, 0, velocity.z) * (0.08 * (i + 1)) + Vector3(sin(t * 4.0 + i * 1.7), 0, cos(t * 3.3 + i)) * 0.12
+		if show and not m.visible:
+			m.global_position = tgt
+		m.visible = show
+		if show:
+			m.global_position = m.global_position.lerp(tgt, 1.0 - exp(-10.0 * delta))
+			m.scale = Vector3.ONE * maxf((0.34 - i * 0.05) * (0.4 + st * 1.3), 0.02)
 	drips.emitting = water_form and spd > 2.0 and not in_water
 
 func _r(n: Node3D, a: float, k: float) -> void:
